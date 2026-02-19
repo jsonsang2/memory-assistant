@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "sessionStart": [{ "command": "node PLUGIN_PATH/hooks/session-start.js" }],
+    "postToolUse":  [{ "command": "node PLUGIN_PATH/hooks/post-tool-use.js" }],
+    "stop":         [{ "command": "node PLUGIN_PATH/hooks/stop.js" }],
+    "sessionEnd":   [{ "command": "node PLUGIN_PATH/hooks/session-end.js" }]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "memory-assistant",
+  "description": "Persistent memory across AI IDE sessions - captures tool use, injects context, enables memory search",
+  "version": "0.1.0",
+  "author": { "name": "woosanglee" },
+  "keywords": ["memory", "context", "persistence", "sessions"]
+}

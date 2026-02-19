@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memory-assistant": {
+      "command": "node",
+      "args": ["./mcp/dist/index.js"],
+      "env": {
+        "MEMORY_ASSISTANT_PORT": "37888"
+      }
+    }
+  }
+}
