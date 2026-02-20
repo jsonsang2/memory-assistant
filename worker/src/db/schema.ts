@@ -97,6 +97,20 @@ try {
 // Create index on prompt_number (after migration ensures column exists)
 db.exec(`CREATE INDEX IF NOT EXISTS idx_observations_session_prompt ON observations(session_id, prompt_number)`);
 
+// Migration: add user_prompt column to prompt_summaries
+try {
+  db.prepare(`SELECT user_prompt FROM prompt_summaries LIMIT 1`).get();
+} catch {
+  db.exec(`ALTER TABLE prompt_summaries ADD COLUMN user_prompt TEXT`);
+}
+
+// Migration: add assistant_response column to prompt_summaries
+try {
+  db.prepare(`SELECT assistant_response FROM prompt_summaries LIMIT 1`).get();
+} catch {
+  db.exec(`ALTER TABLE prompt_summaries ADD COLUMN assistant_response TEXT`);
+}
+
 export function getDb() {
   return db;
 }

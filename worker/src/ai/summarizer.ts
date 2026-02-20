@@ -1,4 +1,4 @@
-import type { AISummarizer, Observation, Session } from '../types.js';
+import type { AISummarizer, Observation, Session, StructuredPromptSummary } from '../types.js';
 
 export function createSummarizer(): AISummarizer {
   // Lazy-load Anthropic SDK to avoid errors when API key is not set
@@ -118,6 +118,54 @@ ${obsText}`;
           summary: `Prompt #${promptNumber} with ${observations.length} observations`,
           key_learnings: [],
         };
+      }
+    },
+
+    async summarizePromptStructured(userPrompt: string, assistantResponse: string, observations: Observation[]): Promise<StructuredPromptSummary> {
+      const fallback: StructuredPromptSummary = {
+        request: userPrompt.slice(0, 200) || 'Unknown request',
+        investigated: observations.map(o => o.tool_name).join(', ') || 'N/A',
+        learned: 'N/A',
+        completed: `${observations.length} tool calls executed`,
+        next_steps: 'N/A',
+      };
+
+      try {
+        const anthropic = await getClient();
+
+        const obsText = observations.map(o =>
+          `- [${o.tool_name}] ${o.ai_summary || o.tool_input?.slice(0, 100) || 'no details'}`
+        ).join('\n');
+
+        const prompt = `Summarize this coding session prompt. Return JSON with exactly these fields:
+- request: What the user asked for (1 sentence)
+- investigated: What files/areas were examined (1 sentence)
+- learned: Key discoveries or findings (1 sentence)
+- completed: What was actually done (1 sentence)
+- next_steps: Remaining work or follow-ups (1 sentence)
+
+User prompt: ${userPrompt}
+Assistant response: ${assistantResponse.slice(0, 500)}
+Tool usage: ${obsText}`;
+
+        const response = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: prompt }],
+        });
+
+        const text = response.content[0]?.type === 'text' ? response.content[0].text : '{}';
+        const parsed = JSON.parse(text);
+        return {
+          request: parsed.request || fallback.request,
+          investigated: parsed.investigated || fallback.investigated,
+          learned: parsed.learned || fallback.learned,
+          completed: parsed.completed || fallback.completed,
+          next_steps: parsed.next_steps || fallback.next_steps,
+        };
+      } catch (e) {
+        console.error('Failed to summarize prompt structured:', e);
+        return fallback;
       }
     },
   };

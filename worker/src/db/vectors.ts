@@ -17,7 +17,7 @@ export async function initChroma(): Promise<void> {
 
     // Delete old collection if it has no embedding function, then recreate
     try {
-      const existing = await client.getCollection({ name: COLLECTION_NAME });
+      const existing = await client.getCollection({ name: COLLECTION_NAME, embeddingFunction: ef });
       // @ts-ignore - check config
       const hasEmbedding = existing.metadata?.embedding_function != null ||
         (existing as any).embeddingFunction != null;

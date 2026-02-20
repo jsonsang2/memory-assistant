@@ -1,8 +1,10 @@
 {
+  "_comment": "Copy to ~/.cursor/hooks.json and replace PLUGIN_PATH with actual path",
+  "version": 1,
   "hooks": {
-    "sessionStart": [{ "command": "node PLUGIN_PATH/hooks/session-start.js" }],
-    "postToolUse":  [{ "command": "node PLUGIN_PATH/hooks/post-tool-use.js" }],
-    "stop":         [{ "command": "node PLUGIN_PATH/hooks/stop.js" }],
-    "sessionEnd":   [{ "command": "node PLUGIN_PATH/hooks/session-end.js" }]
+    "beforeSubmitPrompt": [{ "command": "node PLUGIN_PATH/hooks/before-submit-prompt.js" }],
+    "afterFileEdit":      [{ "command": "node PLUGIN_PATH/hooks/after-file-edit.js" }],
+    "beforeShellExecution": [{ "command": "node PLUGIN_PATH/hooks/before-shell-execution.js" }],
+    "stop":               [{ "command": "node PLUGIN_PATH/hooks/stop.js" }]
   }
 }

@@ -1,14 +1,13 @@
 #!/usr/bin/env node
-// session-start.js - Cursor sessionStart hook
-// Input (stdin): { session_id?, is_background_agent, composer_mode }
-// Output (stdout): { "additional_context": "..." }
+// before-submit-prompt.js - Cursor beforeSubmitPrompt hook
+// Input (stdin): { conversation_id, generation_id, prompt, attachments, workspace_roots }
+// Replaces session-start.js + user-prompt-submit.js for Cursor
 
 'use strict';
 
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const crypto = require('crypto');
 const child_process = require('child_process');
 
 const PORT = process.env.MEMORY_ASSISTANT_PORT || 37888;
@@ -35,7 +34,7 @@ async function readStdin() {
   });
 }
 
-async function safeFetch(url, options = {}, timeoutMs = 5000) {
+async function safeFetch(url, options = {}, timeoutMs = 3000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -62,9 +61,7 @@ function spawnWorker() {
     workerProcess.unref();
     fs.mkdirSync(SESSION_DIR, { recursive: true });
     fs.writeFileSync(PID_FILE, String(workerProcess.pid));
-  } catch {
-    // ignore spawn errors
-  }
+  } catch {}
 }
 
 async function isChromaRunning() {
@@ -73,7 +70,6 @@ async function isChromaRunning() {
 }
 
 function findChromaBinary() {
-  // uv tool install puts chroma here by default
   const candidates = [
     path.join(os.homedir(), '.local', 'bin', 'chroma'),
     '/usr/local/bin/chroma',
@@ -82,7 +78,6 @@ function findChromaBinary() {
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
-  // Fallback: hope it's in PATH
   return 'chroma';
 }
 
@@ -97,96 +92,84 @@ function spawnChroma() {
     );
     chromaProcess.unref();
     fs.writeFileSync(CHROMA_PID_FILE, String(chromaProcess.pid));
-  } catch {
-    // ignore spawn errors
-  }
-}
-
-function formatContext(recent) {
-  if (!recent || !Array.isArray(recent) || recent.length === 0) {
-    return '';
-  }
-  const lines = ['Recent memory-assistant context:'];
-  for (const item of recent) {
-    // Prefer prompt-level summaries over session-level
-    let promptSummaries = [];
-    try {
-      if (item.prompt_summaries) {
-        promptSummaries = JSON.parse(item.prompt_summaries);
-      }
-    } catch {}
-
-    if (Array.isArray(promptSummaries) && promptSummaries.length > 0 && promptSummaries[0].summary) {
-      lines.push(`Session (${item.started_at || 'unknown'}):`);
-      for (const ps of promptSummaries) {
-        const promptLine = ps.user_prompt
-          ? `Prompt #${ps.prompt_number} [${ps.user_prompt.slice(0, 80)}]: ${ps.summary}`
-          : `Prompt #${ps.prompt_number}: ${ps.summary}`;
-        lines.push(`  - ${promptLine}`);
-      }
-    } else {
-      const summary = item.summary || item.content || item.observation || JSON.stringify(item);
-      lines.push(`- ${summary}`);
-    }
-  }
-  return lines.join('\n');
+  } catch {}
 }
 
 async function main() {
   try {
-    // Read stdin (we don't use most fields, but parse anyway)
-    await readStdin();
+    const data = await readStdin();
+    const conversationId = data.conversation_id;
+    const userPrompt = (data.prompt || '').slice(0, 2000);
 
-    const projectPath =
-      process.env.CURSOR_PROJECT_DIR ||
-      process.env.CLAUDE_PROJECT_DIR ||
-      process.cwd();
+    if (!conversationId) {
+      process.exit(0);
+    }
 
-    const session_id = crypto.randomUUID();
-    const started_at = new Date().toISOString();
+    const projectPath = (data.workspace_roots && data.workspace_roots[0]) || process.cwd();
 
     // Ensure session dir exists
     fs.mkdirSync(SESSION_DIR, { recursive: true });
 
-    // Check if ChromaDB is running, spawn if not (fire-and-forget)
+    // Auto-start ChromaDB if not running
     const chromaRunning = await isChromaRunning();
     if (!chromaRunning) {
       spawnChroma();
     }
 
-    // Check if worker is running, spawn if not
+    // Auto-start worker if not running
     const running = await isWorkerRunning();
     if (!running) {
       spawnWorker();
-      // Give worker a moment to start before continuing
       await new Promise(r => setTimeout(r, 300));
     }
 
-    // Write session file (overwrite if exists)
-    const sessionData = { session_id, project_path: projectPath, started_at, prompt_number: 1 };
+    // Check if this is the same conversation or a new one
+    let sessionData;
+    let isNewSession = true;
+    try {
+      sessionData = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+      if (sessionData.session_id === conversationId) {
+        // Same conversation, new prompt
+        isNewSession = false;
+        sessionData.prompt_number = (sessionData.prompt_number || 0) + 1;
+      }
+    } catch {
+      sessionData = null;
+    }
+
+    if (isNewSession) {
+      // New conversation
+      sessionData = {
+        session_id: conversationId,
+        project_path: projectPath,
+        started_at: new Date().toISOString(),
+        prompt_number: 1,
+      };
+
+      // Register session with worker
+      await safeFetch(`${BASE_URL}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sessionData),
+      }, 2000);
+    }
+
+    // Write updated session file
     fs.writeFileSync(SESSION_FILE, JSON.stringify(sessionData));
 
-    // Non-blocking: register session with worker
-    safeFetch(`${BASE_URL}/api/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sessionData),
-    }, 500).catch(() => {});
-
-    // Fetch recent context
-    const encodedPath = encodeURIComponent(projectPath);
-    const recent = await safeFetch(
-      `${BASE_URL}/api/context/recent?project=${encodedPath}&limit=5`,
-      {},
-      1000
-    );
-
-    const contextString = formatContext(recent);
-
-    process.stdout.write(JSON.stringify({ additional_context: contextString }));
-  } catch {
-    process.stdout.write(JSON.stringify({ additional_context: '' }));
-  }
+    // Save user prompt
+    if (userPrompt) {
+      await safeFetch(`${BASE_URL}/api/prompts/user-prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: conversationId,
+          prompt_number: sessionData.prompt_number,
+          user_prompt: userPrompt,
+        }),
+      }, 2000);
+    }
+  } catch {}
   process.exit(0);
 }
 

@@ -113,21 +113,134 @@ app.get('/api/prompts/pending', (req, res) => {
 // Save prompt summary (from VS Code Extension)
 app.patch('/api/prompts/summary', (req, res) => {
   try {
-    const { session_id, prompt_number, summary, key_learnings } = req.body;
+    const { session_id, prompt_number, summary, key_learnings, user_prompt, assistant_response } = req.body;
     if (!session_id || prompt_number === undefined || !summary) {
       res.status(400).json({ error: 'session_id, prompt_number, and summary are required', code: 'MISSING_FIELDS' });
       return;
     }
 
-    // session_id here is the internal integer ID from the pending endpoint
+    const userPrompt = user_prompt ? String(user_prompt).slice(0, 2000) : null;
+    const assistantResponse = assistant_response ? String(assistant_response).slice(0, 2000) : null;
+    const key_learnings_json = JSON.stringify(key_learnings || []);
+
+    // Resolve string session_id to integer DB ID
+    let dbSessionId: number | string = session_id;
+    if (typeof session_id === 'string' && isNaN(Number(session_id))) {
+      const session = getSession(session_id);
+      if (!session) {
+        res.status(404).json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' });
+        return;
+      }
+      dbSessionId = session.id;
+    }
+
     db.prepare(`
-      INSERT OR REPLACE INTO prompt_summaries (session_id, prompt_number, summary, key_learnings)
-      VALUES (?, ?, ?, ?)
-    `).run(session_id, prompt_number, summary, JSON.stringify(key_learnings || []));
+      INSERT INTO prompt_summaries (session_id, prompt_number, summary, key_learnings, user_prompt, assistant_response)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, prompt_number) DO UPDATE SET
+        summary = COALESCE(excluded.summary, prompt_summaries.summary),
+        key_learnings = COALESCE(excluded.key_learnings, prompt_summaries.key_learnings),
+        user_prompt = COALESCE(excluded.user_prompt, prompt_summaries.user_prompt),
+        assistant_response = COALESCE(excluded.assistant_response, prompt_summaries.assistant_response)
+    `).run(dbSessionId, prompt_number, summary, key_learnings_json, userPrompt, assistantResponse);
 
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message, code: 'SAVE_PROMPT_SUMMARY_ERROR' });
+  }
+});
+
+// POST /api/prompts/user-prompt - capture user prompt text from UserPromptSubmit hook
+app.post('/api/prompts/user-prompt', (req, res) => {
+  try {
+    const { session_id, prompt_number, user_prompt } = req.body;
+    if (!session_id || !prompt_number || !user_prompt) {
+      res.status(400).json({ error: 'session_id, prompt_number, and user_prompt are required' });
+      return;
+    }
+
+    const session = getSession(session_id);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    const truncatedPrompt = String(user_prompt).slice(0, 2000);
+
+    db.prepare(`
+      INSERT INTO prompt_summaries (session_id, prompt_number, summary, user_prompt)
+      VALUES (?, ?, '', ?)
+      ON CONFLICT(session_id, prompt_number) DO UPDATE SET
+        user_prompt = excluded.user_prompt
+    `).run(session.id, prompt_number, truncatedPrompt);
+
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/prompts/summarize-ai - fire-and-forget AI summarization
+app.post('/api/prompts/summarize-ai', (req, res) => {
+  try {
+    const { session_id, prompt_number } = req.body;
+    if (!session_id || prompt_number === undefined) {
+      res.status(400).json({ error: 'session_id and prompt_number are required' });
+      return;
+    }
+
+    // Return immediately, process in background
+    res.status(202).json({ message: 'AI summarization started' });
+
+    setImmediate(async () => {
+      try {
+        if (!process.env.ANTHROPIC_API_KEY) return;
+
+        const summarizer = createSummarizer();
+
+        const session = getSession(session_id);
+        if (!session) return;
+
+        // Read existing prompt summary for user_prompt and assistant_response
+        const promptRow = db.prepare(`
+          SELECT user_prompt, assistant_response FROM prompt_summaries
+          WHERE session_id = ? AND prompt_number = ?
+        `).get(session.id, prompt_number) as { user_prompt: string | null; assistant_response: string | null } | undefined;
+
+        const userPrompt = promptRow?.user_prompt || '';
+        const assistantResponse = promptRow?.assistant_response || '';
+
+        // Get observations for this prompt
+        const observations = getObservationsByPrompt(session_id, prompt_number);
+
+        // Run AI summarization
+        const structured = await summarizer.summarizePromptStructured(
+          userPrompt, assistantResponse, observations
+        );
+
+        // Format into summary string
+        const aiSummary = [
+          structured.request,
+          `Investigated: ${structured.investigated}`,
+          `Learned: ${structured.learned}`,
+          `Completed: ${structured.completed}`,
+          `Next: ${structured.next_steps}`,
+        ].join(' | ');
+
+        const keyLearnings = [structured.learned, structured.next_steps].filter(s => s && s !== 'N/A');
+
+        // Update prompt summary with AI result
+        db.prepare(`
+          UPDATE prompt_summaries SET summary = ?, key_learnings = ?
+          WHERE session_id = ? AND prompt_number = ?
+        `).run(aiSummary, JSON.stringify(keyLearnings), session.id, prompt_number);
+
+      } catch (err) {
+        console.error('AI summarization failed:', err);
+      }
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

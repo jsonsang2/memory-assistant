@@ -58,7 +58,8 @@ export function getRecentSessions(
         SELECT json_group_array(json_object(
           'prompt_number', ps2.prompt_number,
           'summary', ps2.summary,
-          'key_learnings', ps2.key_learnings
+          'key_learnings', ps2.key_learnings,
+          'user_prompt', ps2.user_prompt
         ))
         FROM (
           SELECT * FROM prompt_summaries

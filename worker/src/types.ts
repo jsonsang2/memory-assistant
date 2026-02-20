@@ -35,7 +35,17 @@ export interface PromptSummary {
   prompt_number: number;
   summary: string;
   key_learnings: string[];
+  user_prompt: string | null;
+  assistant_response: string | null;
   created_at: string;
+}
+
+export interface StructuredPromptSummary {
+  request: string;
+  investigated: string;
+  learned: string;
+  completed: string;
+  next_steps: string;
 }
 
 export interface SearchResult {
@@ -51,4 +61,9 @@ export interface AISummarizer {
   summarizeObservations(observations: Observation[]): Promise<{ id: number; summary: string }[]>;
   summarizeSession(session: Session, observations: Observation[]): Promise<{ summary: string; key_learnings: string[] }>;
   summarizePrompt(session: Session, promptNumber: number, observations: Observation[]): Promise<{ summary: string; key_learnings: string[] }>;
+  summarizePromptStructured(
+    userPrompt: string,
+    assistantResponse: string,
+    observations: Observation[]
+  ): Promise<StructuredPromptSummary>;
 }

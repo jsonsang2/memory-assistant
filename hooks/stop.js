@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// stop.js - Cursor stop hook
-// Input (stdin): { status, loop_count }
-// Summarizes the current prompt's observations using Cursor Agent CLI
+// stop.js - Stop hook (compatible with both Cursor and Claude Code)
+// Cursor stdin: { conversation_id, generation_id, status, workspace_roots }
+// Claude Code stdin: { status, loop_count, last_assistant_message }
+// Saves basic summary and triggers AI summarization
 
 'use strict';
 
@@ -40,7 +41,9 @@ async function safeFetch(url, options = {}, timeoutMs = 5000) {
 
 async function main() {
   try {
-    await readStdin();
+    const stdinData = await readStdin();
+    // Claude Code provides last_assistant_message; Cursor does not
+    const assistantResponse = (stdinData.last_assistant_message || '').slice(0, 2000) || null;
 
     // Read session file
     let sessionData;
@@ -57,60 +60,66 @@ async function main() {
       process.exit(0);
     }
 
-    // Increment prompt_number for the next prompt (do this first, before async work)
-    try {
-      sessionData.prompt_number = prompt_number + 1;
-      fs.writeFileSync(SESSION_FILE, JSON.stringify(sessionData));
-    } catch {
-      // ignore write errors
-    }
-
     // Wait for summarization to complete before exiting
-    await summarizePrompt(session_id, prompt_number).catch(() => {});
+    await summarizePrompt(session_id, prompt_number, assistantResponse).catch(() => {});
 
   } catch {
     // ignore all errors
   }
 }
 
-async function summarizePrompt(session_id, prompt_number) {
+async function summarizePrompt(session_id, prompt_number, assistantResponse) {
   // Fetch unsummarized observations for this specific session + prompt
   const promptObs = await safeFetch(
     `${BASE_URL}/api/observations/unsummarized?session_id=${encodeURIComponent(session_id)}&prompt_number=${prompt_number}&limit=50`
   );
-  if (!promptObs || !Array.isArray(promptObs) || promptObs.length === 0) return;
 
-  // Step 1: Save basic summaries immediately (fast, no AI)
-  const toolCounts = {};
-  for (const o of promptObs) {
-    toolCounts[o.tool_name] = (toolCounts[o.tool_name] || 0) + 1;
+  // Build basic summary even if no observations (we might still have user_prompt)
+  let basicSummary;
+  if (promptObs && Array.isArray(promptObs) && promptObs.length > 0) {
+    const toolCounts = {};
+    for (const o of promptObs) {
+      toolCounts[o.tool_name] = (toolCounts[o.tool_name] || 0) + 1;
+    }
+    const toolDesc = Object.entries(toolCounts)
+      .map(([name, count]) => `${name}(${count})`)
+      .join(', ');
+    basicSummary = `Prompt #${prompt_number}: ${promptObs.length} tool calls — ${toolDesc}`;
+  } else {
+    basicSummary = `Prompt #${prompt_number}: conversation only`;
   }
-  const toolDesc = Object.entries(toolCounts)
-    .map(([name, count]) => `${name}(${count})`)
-    .join(', ');
-  const basicSummary = `Prompt #${prompt_number}: ${promptObs.length} tool calls — ${toolDesc}`;
 
-  // Save prompt summary
+  // Save prompt summary (PATCH upserts with COALESCE)
   await safeFetch(`${BASE_URL}/api/prompts/summary`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      session_id: promptObs[0].session_id,
+      session_id,
       prompt_number,
       summary: basicSummary,
       key_learnings: [],
+      assistant_response: assistantResponse,
     }),
   });
 
   // Save individual observation summaries
-  for (const obs of promptObs) {
-    const obsSummary = `[${obs.tool_name}] ${(obs.tool_input || '').slice(0, 100)}`;
-    await safeFetch(`${BASE_URL}/api/observations/${obs.id}/summary`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ summary: obsSummary }),
-    });
+  if (promptObs && Array.isArray(promptObs)) {
+    for (const obs of promptObs) {
+      const obsSummary = `[${obs.tool_name}] ${(obs.tool_input || '').slice(0, 100)}`;
+      await safeFetch(`${BASE_URL}/api/observations/${obs.id}/summary`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summary: obsSummary }),
+      });
+    }
   }
+
+  // Fire-and-forget: trigger AI summarization in worker (non-blocking)
+  safeFetch(`${BASE_URL}/api/prompts/summarize-ai`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id, prompt_number }),
+  }, 1000).catch(() => {});
 }
 
 main();
