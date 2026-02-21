@@ -7,99 +7,135 @@ const os = require('os');
 const { execSync } = require('child_process');
 
 const PLUGIN_DIR = path.resolve(__dirname, '..');
-const CURSOR_HOOKS_PATH = path.join(os.homedir(), '.cursor', 'hooks.json');
+const CURSOR_DIR = path.join(os.homedir(), '.cursor');
+const CURSOR_HOOKS_PATH = path.join(CURSOR_DIR, 'hooks.json');
+const CURSOR_MCP_PATH = path.join(CURSOR_DIR, 'mcp.json');
 const MA_DIR = path.join(os.homedir(), '.memory-assistant');
 
 function main() {
-  console.log('Installing memory-assistant...\n');
+  console.log('');
+  console.log('  memory-assistant installer');
+  console.log('  =========================');
+  console.log('');
 
-  // 1. Create ~/.memory-assistant/ directory
+  // 1. Create ~/.memory-assistant/
   if (!fs.existsSync(MA_DIR)) {
     fs.mkdirSync(MA_DIR, { recursive: true });
-    console.log(`✓ Created ${MA_DIR}`);
+    console.log('  [1/5] Created ~/.memory-assistant/');
+  } else {
+    console.log('  [1/5] ~/.memory-assistant/ already exists');
   }
 
-  // 2. Read existing ~/.cursor/hooks.json or create empty
-  let cursorHooks = { version: 1, hooks: {} };
-  const cursorDir = path.join(os.homedir(), '.cursor');
-  if (!fs.existsSync(cursorDir)) {
-    fs.mkdirSync(cursorDir, { recursive: true });
+  // 2. Build Worker
+  console.log('  [2/5] Building Worker...');
+  try {
+    execSync('npm install && npm run build', {
+      cwd: path.join(PLUGIN_DIR, 'worker'),
+      stdio: 'pipe',
+    });
+    console.log('        Worker built successfully');
+  } catch (e) {
+    console.error('        ERROR: Worker build failed');
+    console.error('        Run manually: cd worker && npm install && npm run build');
+    process.exit(1);
   }
+
+  // 3. Build MCP Server
+  console.log('  [3/5] Building MCP Server...');
+  try {
+    execSync('npm install && npm run build', {
+      cwd: path.join(PLUGIN_DIR, 'mcp'),
+      stdio: 'pipe',
+    });
+    console.log('        MCP Server built successfully');
+  } catch (e) {
+    console.error('        ERROR: MCP build failed');
+    console.error('        Run manually: cd mcp && npm install && npm run build');
+    process.exit(1);
+  }
+
+  // 4. Register Cursor Hooks
+  console.log('  [4/5] Registering Cursor hooks...');
+  if (!fs.existsSync(CURSOR_DIR)) {
+    fs.mkdirSync(CURSOR_DIR, { recursive: true });
+  }
+
+  let cursorHooks = { version: 1, hooks: {} };
   if (fs.existsSync(CURSOR_HOOKS_PATH)) {
     try {
       cursorHooks = JSON.parse(fs.readFileSync(CURSOR_HOOKS_PATH, 'utf8'));
-      console.log(`✓ Read existing ${CURSOR_HOOKS_PATH}`);
-    } catch (e) {
-      console.warn(`Warning: Could not parse existing hooks.json, creating fresh`);
+    } catch {
+      console.warn('        Warning: Could not parse existing hooks.json, creating fresh');
     }
   }
-
-  // 3. Merge memory-assistant hooks
   if (!cursorHooks.hooks) cursorHooks.hooks = {};
 
   const hooksToAdd = {
-    sessionStart: `node ${PLUGIN_DIR}/hooks/session-start.js`,
-    postToolUse:  `node ${PLUGIN_DIR}/hooks/post-tool-use.js`,
-    stop:         `node ${PLUGIN_DIR}/hooks/stop.js`,
-    sessionEnd:   `node ${PLUGIN_DIR}/hooks/session-end.js`,
+    beforeSubmitPrompt:   `node ${PLUGIN_DIR}/hooks/before-submit-prompt.js`,
+    afterFileEdit:        `node ${PLUGIN_DIR}/hooks/after-file-edit.js`,
+    beforeShellExecution: `node ${PLUGIN_DIR}/hooks/before-shell-execution.js`,
+    stop:                 `node ${PLUGIN_DIR}/hooks/stop.js`,
   };
+
+  // Remove old memory-assistant hooks (Claude Code names)
+  const oldHookNames = ['sessionStart', 'userPromptSubmit', 'postToolUse', 'sessionEnd'];
+  for (const hookName of oldHookNames) {
+    if (cursorHooks.hooks[hookName]) {
+      cursorHooks.hooks[hookName] = cursorHooks.hooks[hookName].filter(
+        h => !h.command || !h.command.includes('memory-assistant')
+      );
+      if (cursorHooks.hooks[hookName].length === 0) {
+        delete cursorHooks.hooks[hookName];
+      }
+    }
+  }
 
   for (const [hookName, command] of Object.entries(hooksToAdd)) {
     if (!cursorHooks.hooks[hookName]) {
       cursorHooks.hooks[hookName] = [];
     }
-    // Avoid duplicate entries
-    const alreadyRegistered = cursorHooks.hooks[hookName].some(
-      h => h.command && h.command.includes('memory-assistant')
+    // Remove existing memory-assistant entry and re-add (in case path changed)
+    cursorHooks.hooks[hookName] = cursorHooks.hooks[hookName].filter(
+      h => !h.command || !h.command.includes('memory-assistant')
     );
-    if (!alreadyRegistered) {
-      cursorHooks.hooks[hookName].push({ command });
-      console.log(`✓ Registered ${hookName} hook`);
-    } else {
-      console.log(`  (skipped ${hookName} - already registered)`);
-    }
+    cursorHooks.hooks[hookName].push({ command });
   }
 
-  // 4. Write back
   fs.writeFileSync(CURSOR_HOOKS_PATH, JSON.stringify(cursorHooks, null, 2));
-  console.log(`\n✓ Saved ${CURSOR_HOOKS_PATH}`);
+  console.log('        Hooks registered: beforeSubmitPrompt, afterFileEdit, beforeShellExecution, stop');
 
-  // 5. Build and install VSCode Extension (uses Cursor built-in model, no API key needed)
-  const EXT_SRC_DIR = path.join(PLUGIN_DIR, 'vscode-extension');
-  const EXT_VERSION = JSON.parse(fs.readFileSync(path.join(EXT_SRC_DIR, 'package.json'), 'utf8')).version;
-  const EXT_DEST_DIR = path.join(os.homedir(), '.cursor', 'extensions', `memory-assistant-vscode-${EXT_VERSION}`);
-
-  try {
-    // Build extension if dist doesn't exist or is outdated
-    const distPath = path.join(EXT_SRC_DIR, 'dist', 'extension.js');
-    if (!fs.existsSync(distPath)) {
-      console.log('Building VSCode Extension...');
-      execSync('npm install && npm run build', { cwd: EXT_SRC_DIR, stdio: 'inherit' });
+  // 5. Register MCP Server
+  console.log('  [5/5] Registering MCP server...');
+  let mcpConfig = { mcpServers: {} };
+  if (fs.existsSync(CURSOR_MCP_PATH)) {
+    try {
+      mcpConfig = JSON.parse(fs.readFileSync(CURSOR_MCP_PATH, 'utf8'));
+    } catch {
+      console.warn('        Warning: Could not parse existing mcp.json, creating fresh');
     }
-
-    // Copy to ~/.cursor/extensions/
-    if (fs.existsSync(EXT_DEST_DIR)) {
-      fs.rmSync(EXT_DEST_DIR, { recursive: true });
-    }
-    fs.mkdirSync(path.join(EXT_DEST_DIR, 'dist'), { recursive: true });
-    fs.copyFileSync(path.join(EXT_SRC_DIR, 'package.json'), path.join(EXT_DEST_DIR, 'package.json'));
-    fs.copyFileSync(distPath, path.join(EXT_DEST_DIR, 'dist', 'extension.js'));
-
-    console.log(`✓ VSCode Extension installed → ${EXT_DEST_DIR}`);
-    console.log('  AI summarization uses Cursor built-in model (no ANTHROPIC_API_KEY needed)');
-  } catch (e) {
-    console.warn('⚠️  VSCode Extension install failed:', e.message);
-    console.warn('   Run manually: cd vscode-extension && npm install && npm run build');
   }
+  if (!mcpConfig.mcpServers) mcpConfig.mcpServers = {};
 
-  // 6. Optional: Anthropic SDK fallback info
-  if (process.env.ANTHROPIC_API_KEY) {
-    console.log('\n✓ ANTHROPIC_API_KEY detected (used as fallback if VSCode Extension is unavailable)');
-  }
+  mcpConfig.mcpServers['memory-assistant'] = {
+    command: 'node',
+    args: [path.join(PLUGIN_DIR, 'mcp', 'dist', 'index.js')],
+  };
 
-  console.log('\n✅ memory-assistant installed successfully!');
-  console.log('   Restart Cursor to activate.\n');
-  console.log('   To uninstall: node scripts/uninstall.js\n');
+  fs.writeFileSync(CURSOR_MCP_PATH, JSON.stringify(mcpConfig, null, 2));
+  console.log('        MCP server registered: memory-assistant');
+
+  // Done
+  console.log('');
+  console.log('  ✅ memory-assistant installed successfully!');
+  console.log('');
+  console.log('  Next steps:');
+  console.log('    1. Restart Cursor');
+  console.log('    2. (Optional) Set ANTHROPIC_API_KEY for AI summarization');
+  console.log('    3. (Optional) Install ChromaDB for semantic search:');
+  console.log('       pip install chromadb');
+  console.log('');
+  console.log('  To uninstall: node scripts/uninstall.js');
+  console.log('');
 }
 
 main();
