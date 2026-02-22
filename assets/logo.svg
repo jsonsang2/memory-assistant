@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <rect width="128" height="128" rx="24" fill="#1a1a2e"/>
+  <g transform="translate(24, 20)">
+    <!-- Brain/memory icon -->
+    <path d="M40 8C26 8 16 18 16 32C16 42 22 50 30 54L30 72C30 76 34 80 38 80L42 80C46 80 50 76 50 72L50 54C58 50 64 42 64 32C64 18 54 8 40 8Z" fill="#e94560" opacity="0.9"/>
+    <!-- Neural connections -->
+    <circle cx="32" cy="28" r="4" fill="#ffffff" opacity="0.8"/>
+    <circle cx="48" cy="28" r="4" fill="#ffffff" opacity="0.8"/>
+    <circle cx="40" cy="40" r="4" fill="#ffffff" opacity="0.8"/>
+    <line x1="32" y1="28" x2="40" y2="40" stroke="#ffffff" stroke-width="1.5" opacity="0.5"/>
+    <line x1="48" y1="28" x2="40" y2="40" stroke="#ffffff" stroke-width="1.5" opacity="0.5"/>
+    <line x1="32" y1="28" x2="48" y2="28" stroke="#ffffff" stroke-width="1.5" opacity="0.5"/>
+    <!-- Search magnifier -->
+    <circle cx="58" cy="62" r="12" stroke="#0f3460" stroke-width="4" fill="none"/>
+    <line x1="67" y1="71" x2="76" y2="80" stroke="#0f3460" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

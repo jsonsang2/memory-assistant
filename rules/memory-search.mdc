@@ -1,0 +1,13 @@
+---
+description: Use memory-assistant MCP tools to search past session history when the user asks about previous work
+alwaysApply: true
+---
+
+When the user asks about previous work, past implementations, or debugging history, use the memory-assistant MCP tools to search persistent memory.
+
+Follow the 3-layer progressive disclosure pattern:
+1. `search(query, project, limit)` — compact index of matching observations
+2. `timeline(anchor_id, before, after)` — surrounding context for promising results
+3. `get_observations(ids)` — full detail only for confirmed relevant items
+
+Never skip to layer 3 without filtering through layers 1-2 first.

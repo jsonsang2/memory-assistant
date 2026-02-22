@@ -1,7 +1,34 @@
 {
   "name": "memory-assistant",
-  "description": "Persistent memory across AI IDE sessions - captures tool use, injects context, enables memory search",
+  "displayName": "Memory Assistant",
   "version": "0.1.0",
-  "author": { "name": "woosanglee" },
-  "keywords": ["memory", "context", "persistence", "sessions"]
+  "description": "Persistent memory across AI IDE sessions. Automatically captures tool use, generates AI summaries, and injects context into new conversations. Supports keyword and semantic search via ChromaDB.",
+  "author": {
+    "name": "woosanglee",
+    "email": "woosanglee@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "context",
+    "persistence",
+    "sessions",
+    "hooks",
+    "mcp",
+    "search",
+    "chromadb"
+  ],
+  "logo": "assets/logo.svg",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/woosanglee/memory-assistant"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "setup": {
+    "scripts": {
+      "install": "node scripts/install.js"
+    }
+  }
 }

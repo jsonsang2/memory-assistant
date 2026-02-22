@@ -1,10 +1,24 @@
 {
-  "_comment": "Copy to ~/.cursor/hooks.json and replace PLUGIN_PATH with actual path",
-  "version": 1,
   "hooks": {
-    "beforeSubmitPrompt": [{ "command": "node PLUGIN_PATH/hooks/before-submit-prompt.js" }],
-    "afterFileEdit":      [{ "command": "node PLUGIN_PATH/hooks/after-file-edit.js" }],
-    "beforeShellExecution": [{ "command": "node PLUGIN_PATH/hooks/before-shell-execution.js" }],
-    "stop":               [{ "command": "node PLUGIN_PATH/hooks/stop.js" }]
+    "beforeSubmitPrompt": [
+      {
+        "command": "node ./hooks/before-submit-prompt.js"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "node ./hooks/after-file-edit.js"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node ./hooks/before-shell-execution.js"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node ./hooks/stop.js"
+      }
+    ]
   }
 }

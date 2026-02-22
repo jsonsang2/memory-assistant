@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "memory-assistant": {
+      "command": "node",
+      "args": ["./mcp/dist/index.js"]
+    }
+  }
+}
