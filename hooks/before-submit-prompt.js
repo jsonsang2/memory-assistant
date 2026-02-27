@@ -29,7 +29,7 @@ async function readStdin() {
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', chunk => data += chunk);
     process.stdin.on('end', () => {
-      try { resolve(JSON.parse(data)); } catch { resolve({}); }
+      try { resolve(JSON.parse(data.replace(/^\uFEFF/, ''))); } catch { resolve({}); }
     });
     process.stdin.on('error', () => resolve({}));
     setTimeout(() => resolve({}), 1000);
