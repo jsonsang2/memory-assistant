@@ -2,7 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import db from './db/schema.js';
+import db, { initDb } from './db/schema.js';
 import { upsertSession, getSession, completeSession, getRecentSessions } from './db/sessions.js';
 import {
   insertObservation,
@@ -588,10 +588,15 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
 });
 
-app.listen(PORT, () => {
-  console.log(`memory-assistant worker listening on port ${PORT}`);
-  // Init ChromaDB connection (non-blocking)
-  void initChroma();
-});
+async function start() {
+  await initDb();
+  app.listen(PORT, () => {
+    console.log(`memory-assistant worker listening on port ${PORT}`);
+    // Init ChromaDB connection (non-blocking)
+    void initChroma();
+  });
+}
+
+start();
 
 export default app;
