@@ -18,10 +18,10 @@ function main() {
   console.log('  =========================');
   console.log('');
 
-  // 1. Create ~/.memory-assistant/
+  // 1. Create ~/.memory-assistant/ with secure permissions
   if (!fs.existsSync(MA_DIR)) {
-    fs.mkdirSync(MA_DIR, { recursive: true });
-    console.log('  [1/5] Created ~/.memory-assistant/');
+    fs.mkdirSync(MA_DIR, { recursive: true, mode: 0o700 });
+    console.log('  [1/5] Created ~/.memory-assistant/ (mode 700)');
   } else {
     console.log('  [1/5] ~/.memory-assistant/ already exists');
   }
@@ -62,10 +62,16 @@ function main() {
 
   let cursorHooks = { version: 1, hooks: {} };
   if (fs.existsSync(CURSOR_HOOKS_PATH)) {
+    // Backup before modifying
+    const backupPath = CURSOR_HOOKS_PATH + '.bak';
+    fs.copyFileSync(CURSOR_HOOKS_PATH, backupPath);
+    console.log(`        Backed up hooks.json → hooks.json.bak`);
     try {
       cursorHooks = JSON.parse(fs.readFileSync(CURSOR_HOOKS_PATH, 'utf8'));
     } catch {
-      console.warn('        Warning: Could not parse existing hooks.json, creating fresh');
+      console.error('        ERROR: Could not parse existing hooks.json. Backup saved at hooks.json.bak');
+      console.error('        Aborting hook registration to avoid data loss.');
+      process.exit(1);
     }
   }
   if (!cursorHooks.hooks) cursorHooks.hooks = {};
@@ -108,10 +114,16 @@ function main() {
   console.log('  [5/5] Registering MCP server...');
   let mcpConfig = { mcpServers: {} };
   if (fs.existsSync(CURSOR_MCP_PATH)) {
+    // Backup before modifying
+    const mcpBackupPath = CURSOR_MCP_PATH + '.bak';
+    fs.copyFileSync(CURSOR_MCP_PATH, mcpBackupPath);
+    console.log(`        Backed up mcp.json → mcp.json.bak`);
     try {
       mcpConfig = JSON.parse(fs.readFileSync(CURSOR_MCP_PATH, 'utf8'));
     } catch {
-      console.warn('        Warning: Could not parse existing mcp.json, creating fresh');
+      console.error('        ERROR: Could not parse existing mcp.json. Backup saved at mcp.json.bak');
+      console.error('        Aborting MCP registration to avoid data loss.');
+      process.exit(1);
     }
   }
   if (!mcpConfig.mcpServers) mcpConfig.mcpServers = {};

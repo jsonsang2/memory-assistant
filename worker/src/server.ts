@@ -1,4 +1,7 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import db from './db/schema.js';
 import { upsertSession, getSession, completeSession, getRecentSessions } from './db/sessions.js';
 import {
@@ -15,8 +18,29 @@ import { initChroma, isChromaAvailable, semanticSearch, upsertObservationVector 
 
 const app = express();
 const PORT = parseInt(process.env.MEMORY_ASSISTANT_PORT || '37888', 10);
+const AUTH_TOKEN_FILE = path.join(os.homedir(), '.memory-assistant', 'auth-token');
+
+// Load auth token from file
+let authToken: string | null = null;
+try {
+  authToken = fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim();
+} catch {
+  console.warn('Warning: auth-token file not found. API authentication disabled.');
+}
 
 app.use(express.json({ limit: '5mb' }));
+
+// Auth middleware — skip for /api/health
+app.use((req, res, next) => {
+  if (req.path === '/api/health') return next();
+  if (!authToken) return next(); // no token file = auth disabled (backward compat)
+  const provided = req.headers['x-auth-token'];
+  if (provided !== authToken) {
+    res.status(401).json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' });
+    return;
+  }
+  next();
+});
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -40,7 +64,7 @@ app.post('/api/sessions', (req, res) => {
     res.status(200).json(session);
   } catch (e: any) {
     console.error('POST /api/sessions error:', e);
-    res.status(500).json({ error: e.message, code: 'SESSION_ERROR' });
+    res.status(500).json({ error: 'Internal server error', code: 'SESSION_ERROR' });
   }
 });
 
@@ -56,7 +80,7 @@ app.post('/api/observations', (req, res) => {
     res.status(201).json(result);
   } catch (e: any) {
     console.error('POST /api/observations error:', e);
-    res.status(500).json({ error: e.message, code: 'OBSERVATION_ERROR' });
+    res.status(500).json({ error: 'Internal server error', code: 'OBSERVATION_ERROR' });
   }
 });
 
@@ -72,7 +96,7 @@ app.post('/api/observations/batch', (req, res) => {
     res.status(200).json(observations);
   } catch (e: any) {
     console.error('POST /api/observations/batch error:', e);
-    res.status(500).json({ error: e.message, code: 'BATCH_ERROR' });
+    res.status(500).json({ error: 'Internal server error', code: 'BATCH_ERROR' });
   }
 });
 
@@ -106,7 +130,8 @@ app.get('/api/prompts/pending', (req, res) => {
     `).all(limit);
     res.json(rows);
   } catch (e: any) {
-    res.status(500).json({ error: e.message, code: 'PENDING_PROMPTS_ERROR' });
+    console.error('GET /api/prompts/pending error:', e);
+    res.status(500).json({ error: 'Internal server error', code: 'PENDING_PROMPTS_ERROR' });
   }
 });
 
@@ -146,7 +171,8 @@ app.patch('/api/prompts/summary', (req, res) => {
 
     res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message, code: 'SAVE_PROMPT_SUMMARY_ERROR' });
+    console.error('PATCH /api/prompts/summary error:', e);
+    res.status(500).json({ error: 'Internal server error', code: 'SAVE_PROMPT_SUMMARY_ERROR' });
   }
 });
 
@@ -176,7 +202,8 @@ app.post('/api/prompts/user-prompt', (req, res) => {
 
     res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    console.error('POST /api/prompts/user-prompt error:', e);
+    res.status(500).json({ error: 'Internal server error', code: 'USER_PROMPT_ERROR' });
   }
 });
 
@@ -240,7 +267,8 @@ app.post('/api/prompts/summarize-ai', (req, res) => {
       }
     });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    console.error('POST /api/prompts/summarize-ai error:', e);
+    res.status(500).json({ error: 'Internal server error', code: 'SUMMARIZE_AI_ERROR' });
   }
 });
 
@@ -353,7 +381,8 @@ app.get('/api/observations/unsummarized', (req, res) => {
     const rows = db.prepare(query).all(...params);
     res.json(rows);
   } catch (e: any) {
-    res.status(500).json({ error: e.message, code: 'UNSUMMARIZED_ERROR' });
+    console.error('GET /api/observations/unsummarized error:', e);
+    res.status(500).json({ error: 'Internal server error', code: 'UNSUMMARIZED_ERROR' });
   }
 });
 
@@ -369,7 +398,8 @@ app.patch('/api/observations/:id/summary', (req, res) => {
     updateObservationSummary(id, summary);
     res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message, code: 'UPDATE_SUMMARY_ERROR' });
+    console.error('PATCH /api/observations/:id/summary error:', e);
+    res.status(500).json({ error: 'Internal server error', code: 'UPDATE_SUMMARY_ERROR' });
   }
 });
 
@@ -385,7 +415,7 @@ app.post('/api/sessions/complete', (req, res) => {
     res.status(200).json(result);
   } catch (e: any) {
     console.error('POST /api/sessions/complete error:', e);
-    res.status(500).json({ error: e.message, code: 'COMPLETE_ERROR' });
+    res.status(500).json({ error: 'Internal server error', code: 'COMPLETE_ERROR' });
   }
 });
 
@@ -398,9 +428,15 @@ app.get('/api/context/recent', (req, res) => {
     res.status(200).json(sessions);
   } catch (e: any) {
     console.error('GET /api/context/recent error:', e);
-    res.status(500).json({ error: e.message, code: 'CONTEXT_ERROR' });
+    res.status(500).json({ error: 'Internal server error', code: 'CONTEXT_ERROR' });
   }
 });
+
+// Sanitize user input for FTS5 MATCH queries
+function sanitizeFts5Query(raw: string): string {
+  const cleaned = raw.slice(0, 200).replace(/"/g, '""');
+  return `"${cleaned}"`;
+}
 
 // FTS5 search
 app.get('/api/search', (req, res) => {
@@ -411,6 +447,8 @@ app.get('/api/search', (req, res) => {
       res.status(400).json({ error: 'query is required', code: 'MISSING_QUERY' });
       return;
     }
+
+    const sanitizedQuery = sanitizeFts5Query(query);
 
     let sql = `
       SELECT
@@ -424,7 +462,7 @@ app.get('/api/search', (req, res) => {
       WHERE observations_fts MATCH ?
     `;
 
-    const params: any[] = [query];
+    const params: any[] = [sanitizedQuery];
 
     if (project) {
       sql += ` AND s.project_path = ?`;
@@ -444,11 +482,18 @@ app.get('/api/search', (req, res) => {
     sql += ` ORDER BY rank LIMIT ? OFFSET ?`;
     params.push(parseInt(limit, 10), parseInt(offset, 10));
 
-    const results = db.prepare(sql).all(...params);
+    let results;
+    try {
+      results = db.prepare(sql).all(...params);
+    } catch (ftsErr) {
+      console.error('FTS5 query error:', ftsErr);
+      res.status(400).json({ error: 'Invalid search query', code: 'INVALID_QUERY' });
+      return;
+    }
     res.status(200).json(results);
   } catch (e: any) {
     console.error('GET /api/search error:', e);
-    res.status(500).json({ error: e.message, code: 'SEARCH_ERROR' });
+    res.status(500).json({ error: 'Internal server error', code: 'SEARCH_ERROR' });
   }
 });
 
@@ -483,7 +528,7 @@ app.get('/api/timeline', (req, res) => {
     res.status(400).json({ error: 'session_id or anchor_id is required', code: 'MISSING_PARAMS' });
   } catch (e: any) {
     console.error('GET /api/timeline error:', e);
-    res.status(500).json({ error: e.message, code: 'TIMELINE_ERROR' });
+    res.status(500).json({ error: 'Internal server error', code: 'TIMELINE_ERROR' });
   }
 });
 
@@ -532,14 +577,15 @@ app.get('/api/search/semantic', async (req, res) => {
     const observations = getObservationsByIds(ids);
     res.json(observations);
   } catch (e: any) {
-    res.status(500).json({ error: e.message, code: 'SEMANTIC_SEARCH_ERROR' });
+    console.error('GET /api/search/semantic error:', e);
+    res.status(500).json({ error: 'Internal server error', code: 'SEMANTIC_SEARCH_ERROR' });
   }
 });
 
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled error:', err);
-  res.status(500).json({ error: err.message, code: 'INTERNAL_ERROR' });
+  res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
 });
 
 app.listen(PORT, () => {

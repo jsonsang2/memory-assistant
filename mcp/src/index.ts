@@ -4,8 +4,20 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 const WORKER_URL = `http://localhost:${process.env.MEMORY_ASSISTANT_PORT || 37888}`;
+const AUTH_TOKEN_FILE = path.join(os.homedir(), '.memory-assistant', 'auth-token');
+
+function getAuthToken(): string {
+  try { return fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim(); } catch { return ''; }
+}
+
+function authHeaders(): Record<string, string> {
+  return { 'x-auth-token': getAuthToken() };
+}
 
 const server = new Server(
   { name: 'memory-assistant', version: '0.1.0' },
@@ -86,19 +98,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       for (const [k, v] of Object.entries(args || {})) {
         if (v !== undefined) params.append(k, String(v));
       }
-      const res = await fetch(`${WORKER_URL}/api/search?${params}`);
+      const res = await fetch(`${WORKER_URL}/api/search?${params}`, { headers: authHeaders() });
       result = await res.json();
     } else if (name === 'timeline') {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(args || {})) {
         if (v !== undefined) params.append(k, String(v));
       }
-      const res = await fetch(`${WORKER_URL}/api/timeline?${params}`);
+      const res = await fetch(`${WORKER_URL}/api/timeline?${params}`, { headers: authHeaders() });
       result = await res.json();
     } else if (name === 'get_observations') {
       const res = await fetch(`${WORKER_URL}/api/observations/batch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(args),
       });
       result = await res.json();
@@ -107,7 +119,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       for (const [k, v] of Object.entries(args || {})) {
         if (v !== undefined) params.append(k, String(v));
       }
-      const res = await fetch(`${WORKER_URL}/api/search/semantic?${params}`);
+      const res = await fetch(`${WORKER_URL}/api/search/semantic?${params}`, { headers: authHeaders() });
       result = await res.json();
     } else {
       throw new Error(`Unknown tool: ${name}`);

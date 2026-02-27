@@ -11,7 +11,30 @@ const fs = require('fs');
 
 const PORT = process.env.MEMORY_ASSISTANT_PORT || 37888;
 const BASE_URL = `http://localhost:${PORT}`;
-const SESSION_FILE = path.join(os.homedir(), '.memory-assistant', 'current-session.json');
+const SESSION_DIR = path.join(os.homedir(), '.memory-assistant');
+const SESSION_FILE = path.join(SESSION_DIR, 'current-session.json');
+const AUTH_TOKEN_FILE = path.join(SESSION_DIR, 'auth-token');
+
+function getAuthToken() {
+  try { return fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim(); } catch { return ''; }
+}
+
+function redactSecrets(text) {
+  if (!text) return text;
+  return text
+    // KEY=value, SECRET=value, TOKEN=value, PASSWORD=value patterns
+    .replace(/\b(API_KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH|ACCESS_KEY|PRIVATE_KEY)(\s*=\s*)\S+/gi, '$1$2***')
+    // export VAR=value
+    .replace(/(export\s+\w*(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH)\w*\s*=\s*)\S+/gi, '$1***')
+    // Bearer tokens
+    .replace(/(Bearer\s+)\S+/gi, '$1***')
+    // -p password flags
+    .replace(/(-p\s+)\S+/g, '$1***')
+    // --password=value
+    .replace(/(--password[=\s]+)\S+/gi, '$1***')
+    // connection strings with passwords
+    .replace(/:\/\/([^:]+):([^@]+)@/g, '://$1:***@');
+}
 
 async function readStdin() {
   return new Promise((resolve) => {
@@ -47,7 +70,7 @@ async function main() {
       process.exit(0);
     }
 
-    const command = (data.command || '').slice(0, 2000);
+    const command = redactSecrets((data.command || '').slice(0, 2000));
     const cwd = data.cwd || '';
 
     const controller = new AbortController();
@@ -59,7 +82,7 @@ async function main() {
     // Then save observation (awaited to ensure it completes before exit)
     await fetch(`${BASE_URL}/api/observations`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-auth-token': getAuthToken() },
       body: JSON.stringify({
         session_id,
         tool_name: 'Shell',

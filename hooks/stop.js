@@ -11,7 +11,13 @@ const os = require('os');
 const fs = require('fs');
 const PORT = process.env.MEMORY_ASSISTANT_PORT || 37888;
 const BASE_URL = `http://localhost:${PORT}`;
-const SESSION_FILE = path.join(os.homedir(), '.memory-assistant', 'current-session.json');
+const SESSION_DIR = path.join(os.homedir(), '.memory-assistant');
+const SESSION_FILE = path.join(SESSION_DIR, 'current-session.json');
+const AUTH_TOKEN_FILE = path.join(SESSION_DIR, 'auth-token');
+
+function getAuthToken() {
+  try { return fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim(); } catch { return ''; }
+}
 
 async function readStdin() {
   return new Promise((resolve) => {
@@ -27,10 +33,12 @@ async function readStdin() {
 }
 
 async function safeFetch(url, options = {}, timeoutMs = 5000) {
+  const token = getAuthToken();
+  const headers = { ...options.headers, 'x-auth-token': token };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(url, { ...options, headers, signal: controller.signal });
     return await res.json();
   } catch {
     return null;

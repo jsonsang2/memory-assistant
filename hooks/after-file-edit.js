@@ -11,7 +11,31 @@ const fs = require('fs');
 
 const PORT = process.env.MEMORY_ASSISTANT_PORT || 37888;
 const BASE_URL = `http://localhost:${PORT}`;
-const SESSION_FILE = path.join(os.homedir(), '.memory-assistant', 'current-session.json');
+const SESSION_DIR = path.join(os.homedir(), '.memory-assistant');
+const SESSION_FILE = path.join(SESSION_DIR, 'current-session.json');
+const AUTH_TOKEN_FILE = path.join(SESSION_DIR, 'auth-token');
+
+function getAuthToken() {
+  try { return fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim(); } catch { return ''; }
+}
+
+const SENSITIVE_FILE_PATTERNS = [/\.env($|\.)/, /credentials\.json$/, /\.pem$/, /\.key$/, /\.secret$/, /id_rsa/];
+
+function isSensitiveFile(filePath) {
+  const basename = path.basename(filePath);
+  return SENSITIVE_FILE_PATTERNS.some(p => p.test(basename));
+}
+
+function redactSecrets(text) {
+  if (!text) return text;
+  return text
+    .replace(/\b(API_KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH|ACCESS_KEY|PRIVATE_KEY)(\s*=\s*)\S+/gi, '$1$2***')
+    .replace(/(export\s+\w*(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|AUTH)\w*\s*=\s*)\S+/gi, '$1***')
+    .replace(/(Bearer\s+)\S+/gi, '$1***')
+    .replace(/(-p\s+)\S+/g, '$1***')
+    .replace(/(--password[=\s]+)\S+/gi, '$1***')
+    .replace(/:\/\/([^:]+):([^@]+)@/g, '://$1:***@');
+}
 
 async function readStdin() {
   return new Promise((resolve) => {
@@ -46,22 +70,28 @@ async function main() {
 
     // Build observation from file edit data
     const filePath = data.file_path || '';
+
+    // Skip sensitive files entirely
+    if (isSensitiveFile(filePath)) {
+      process.exit(0);
+    }
+
     const edits = data.edits || [];
     const editSummary = edits.map(e => {
-      const old = (e.old_string || '').slice(0, 100);
-      const new_ = (e.new_string || '').slice(0, 100);
+      const old = redactSecrets((e.old_string || '').slice(0, 100));
+      const new_ = redactSecrets((e.new_string || '').slice(0, 100));
       return `${old} → ${new_}`;
     }).join('; ').slice(0, 500);
 
     const tool_input = JSON.stringify({ file_path: filePath, edit_count: edits.length }).slice(0, 2000);
-    const tool_output = JSON.stringify({ edits: editSummary }).slice(0, 2000);
+    const tool_output = redactSecrets(JSON.stringify({ edits: editSummary }).slice(0, 2000));
 
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 3000);
 
     await fetch(`${BASE_URL}/api/observations`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-auth-token': getAuthToken() },
       body: JSON.stringify({
         session_id,
         tool_name: 'Edit',

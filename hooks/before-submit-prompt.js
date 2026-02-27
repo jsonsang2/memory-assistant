@@ -8,6 +8,7 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
 const child_process = require('child_process');
 
 const PORT = process.env.MEMORY_ASSISTANT_PORT || 37888;
@@ -17,6 +18,7 @@ const CHROMA_URL = `http://localhost:${CHROMA_PORT}`;
 const SESSION_DIR = path.join(os.homedir(), '.memory-assistant');
 const SESSION_FILE = path.join(SESSION_DIR, 'current-session.json');
 const PID_FILE = path.join(SESSION_DIR, 'worker.pid');
+const AUTH_TOKEN_FILE = path.join(SESSION_DIR, 'auth-token');
 const CHROMA_PID_FILE = path.join(SESSION_DIR, 'chroma.pid');
 const CHROMA_DATA_DIR = path.join(SESSION_DIR, 'chroma');
 const WORKER_DIST_PATH = path.join(__dirname, '..', 'worker', 'dist', 'server.js');
@@ -34,11 +36,31 @@ async function readStdin() {
   });
 }
 
+function ensureAuthToken() {
+  fs.mkdirSync(SESSION_DIR, { recursive: true });
+  if (!fs.existsSync(AUTH_TOKEN_FILE)) {
+    const token = crypto.randomUUID();
+    fs.writeFileSync(AUTH_TOKEN_FILE, token, { mode: 0o600 });
+    return token;
+  }
+  return fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim();
+}
+
+function getAuthToken() {
+  try {
+    return fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim();
+  } catch {
+    return ensureAuthToken();
+  }
+}
+
 async function safeFetch(url, options = {}, timeoutMs = 3000) {
+  const token = getAuthToken();
+  const headers = { ...options.headers, 'x-auth-token': token };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(url, { ...options, headers, signal: controller.signal });
     return await res.json();
   } catch {
     return null;
@@ -115,6 +137,9 @@ async function main() {
     if (!chromaRunning) {
       spawnChroma();
     }
+
+    // Ensure auth token exists before starting worker
+    ensureAuthToken();
 
     // Auto-start worker if not running
     const running = await isWorkerRunning();
