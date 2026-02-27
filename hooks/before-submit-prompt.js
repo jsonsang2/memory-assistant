@@ -138,6 +138,9 @@ async function main() {
     const conversationId = data.conversation_id;
     const userPrompt = (data.prompt || '').slice(0, 2000);
 
+    // Ensure auth token exists early (before any early exit)
+    ensureAuthToken();
+
     if (!conversationId) {
       process.exit(0);
     }
@@ -152,9 +155,6 @@ async function main() {
     if (!chromaRunning) {
       spawnChroma();
     }
-
-    // Ensure auth token exists before starting worker
-    ensureAuthToken();
 
     // Auto-start worker if not running
     const running = await isWorkerRunning();
