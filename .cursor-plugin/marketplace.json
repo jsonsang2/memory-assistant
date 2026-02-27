@@ -1,0 +1,18 @@
+{
+  "name": "memory-assistant",
+  "owner": {
+    "name": "woosanglee",
+    "email": "woosanglee@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "Persistent memory across AI IDE sessions",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "memory-assistant",
+      "source": ".",
+      "description": "Automatically captures tool use, generates AI summaries, and enables cross-session memory search."
+    }
+  ]
+}
