@@ -165,25 +165,25 @@ export async function initDb(): Promise<SqliteCompat> {
       observed_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+    CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts4(
       tool_name, tool_input, tool_output, ai_summary,
-      content='observations', content_rowid='id'
+      content="observations"
     );
 
     CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-      INSERT INTO observations_fts(rowid, tool_name, tool_input, tool_output, ai_summary)
+      INSERT INTO observations_fts(docid, tool_name, tool_input, tool_output, ai_summary)
       VALUES (new.id, new.tool_name, new.tool_input, new.tool_output, new.ai_summary);
     END;
 
     CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-      INSERT INTO observations_fts(observations_fts, rowid, tool_name, tool_input, tool_output, ai_summary)
+      INSERT INTO observations_fts(observations_fts, docid, tool_name, tool_input, tool_output, ai_summary)
       VALUES ('delete', old.id, old.tool_name, old.tool_input, old.tool_output, old.ai_summary);
-      INSERT INTO observations_fts(rowid, tool_name, tool_input, tool_output, ai_summary)
+      INSERT INTO observations_fts(docid, tool_name, tool_input, tool_output, ai_summary)
       VALUES (new.id, new.tool_name, new.tool_input, new.tool_output, new.ai_summary);
     END;
 
     CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-      INSERT INTO observations_fts(observations_fts, rowid, tool_name, tool_input, tool_output, ai_summary)
+      INSERT INTO observations_fts(observations_fts, docid, tool_name, tool_input, tool_output, ai_summary)
       VALUES ('delete', old.id, old.tool_name, old.tool_input, old.tool_output, old.ai_summary);
     END;
 
@@ -208,6 +208,46 @@ export async function initDb(): Promise<SqliteCompat> {
     CREATE INDEX IF NOT EXISTS idx_sessions_project_status ON sessions(project_path, status);
     CREATE INDEX IF NOT EXISTS idx_observations_session_observed ON observations(session_id, observed_at);
   `);
+
+  // Migration: FTS5 → FTS4 for sql.js compatibility
+  // If an existing DB has FTS5 tables (from better-sqlite3 era), drop and recreate as FTS4
+  try {
+    const ftsInfo = _instance.prepare(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name='observations_fts'`
+    ).get() as { sql: string } | undefined;
+    if (ftsInfo && ftsInfo.sql && ftsInfo.sql.toLowerCase().includes('fts5')) {
+      console.log('Migrating FTS5 → FTS4...');
+      _instance.exec(`DROP TRIGGER IF EXISTS observations_ai`);
+      _instance.exec(`DROP TRIGGER IF EXISTS observations_au`);
+      _instance.exec(`DROP TRIGGER IF EXISTS observations_ad`);
+      _instance.exec(`DROP TABLE IF EXISTS observations_fts`);
+      _instance.exec(`
+        CREATE VIRTUAL TABLE observations_fts USING fts4(
+          tool_name, tool_input, tool_output, ai_summary,
+          content="observations"
+        );
+        CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
+          INSERT INTO observations_fts(docid, tool_name, tool_input, tool_output, ai_summary)
+          VALUES (new.id, new.tool_name, new.tool_input, new.tool_output, new.ai_summary);
+        END;
+        CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, docid, tool_name, tool_input, tool_output, ai_summary)
+          VALUES ('delete', old.id, old.tool_name, old.tool_input, old.tool_output, old.ai_summary);
+          INSERT INTO observations_fts(docid, tool_name, tool_input, tool_output, ai_summary)
+          VALUES (new.id, new.tool_name, new.tool_input, new.tool_output, new.ai_summary);
+        END;
+        CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, docid, tool_name, tool_input, tool_output, ai_summary)
+          VALUES ('delete', old.id, old.tool_name, old.tool_input, old.tool_output, old.ai_summary);
+        END;
+      `);
+      // Rebuild FTS index from existing data
+      _instance.exec(`INSERT INTO observations_fts(observations_fts) VALUES('rebuild')`);
+      console.log('FTS4 migration complete');
+    }
+  } catch (e) {
+    console.warn('FTS migration check failed (may be fine for new DB):', e);
+  }
 
   // Migration: add prompt_number column to existing observations table
   try {

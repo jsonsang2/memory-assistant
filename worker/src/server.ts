@@ -453,11 +453,10 @@ app.get('/api/search', (req, res) => {
     let sql = `
       SELECT
         o.*,
-        snippet(observations_fts, 0, '<b>', '</b>', '...', 10) as snippet,
-        rank,
+        snippet(observations_fts, '<b>', '</b>', '...', -1, 10) as snippet,
         s.session_id as session_id_text
       FROM observations_fts
-      JOIN observations o ON observations_fts.rowid = o.id
+      JOIN observations o ON observations_fts.docid = o.id
       JOIN sessions s ON o.session_id = s.id
       WHERE observations_fts MATCH ?
     `;
@@ -479,7 +478,7 @@ app.get('/api/search', (req, res) => {
       params.push(date_lte);
     }
 
-    sql += ` ORDER BY rank LIMIT ? OFFSET ?`;
+    sql += ` ORDER BY o.observed_at DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit, 10), parseInt(offset, 10));
 
     let results;
