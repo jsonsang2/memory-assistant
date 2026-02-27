@@ -589,12 +589,25 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 async function start() {
-  await initDb();
-  app.listen(PORT, () => {
-    console.log(`memory-assistant worker listening on port ${PORT}`);
-    // Init ChromaDB connection (non-blocking)
-    void initChroma();
-  });
+  try {
+    await initDb();
+    const server = app.listen(PORT, () => {
+      console.log(`memory-assistant worker listening on port ${PORT}`);
+      // Init ChromaDB connection (non-blocking)
+      void initChroma();
+    });
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(`Port ${PORT} already in use — another worker is running. Exiting.`);
+        process.exit(0);
+      }
+      console.error('Server error:', err);
+      process.exit(1);
+    });
+  } catch (e) {
+    console.error('Worker failed to start:', e);
+    process.exit(1);
+  }
 }
 
 start();

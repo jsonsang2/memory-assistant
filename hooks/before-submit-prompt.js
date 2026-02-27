@@ -22,6 +22,7 @@ const AUTH_TOKEN_FILE = path.join(SESSION_DIR, 'auth-token');
 const CHROMA_PID_FILE = path.join(SESSION_DIR, 'chroma.pid');
 const CHROMA_DATA_DIR = path.join(SESSION_DIR, 'chroma');
 const WORKER_DIST_PATH = path.join(__dirname, '..', 'worker', 'dist', 'server.js');
+const WORKER_LOG_FILE = path.join(SESSION_DIR, 'worker.log');
 
 async function readStdin() {
   return new Promise((resolve) => {
@@ -91,12 +92,18 @@ async function isWorkerRunning() {
 
 function spawnWorker() {
   try {
-    const workerProcess = child_process.spawn('node', [WORKER_DIST_PATH], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    workerProcess.unref();
     fs.mkdirSync(SESSION_DIR, { recursive: true });
+    // Open a log file for worker stderr so crashes are diagnosable
+    const logFd = fs.openSync(WORKER_LOG_FILE, 'a');
+    const spawnOpts = {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+      windowsHide: true,
+      cwd: path.join(__dirname, '..', 'worker'),
+    };
+    const workerProcess = child_process.spawn('node', [WORKER_DIST_PATH], spawnOpts);
+    workerProcess.unref();
+    fs.closeSync(logFd);
     fs.writeFileSync(PID_FILE, String(workerProcess.pid));
   } catch {}
 }
@@ -107,11 +114,17 @@ async function isChromaRunning() {
 }
 
 function findChromaBinary() {
-  const candidates = [
-    path.join(os.homedir(), '.local', 'bin', 'chroma'),
-    '/usr/local/bin/chroma',
-    '/opt/homebrew/bin/chroma',
-  ];
+  const isWin = process.platform === 'win32';
+  const candidates = isWin
+    ? [
+        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', '**', 'Scripts', 'chroma.exe'),
+        path.join(os.homedir(), '.local', 'bin', 'chroma.exe'),
+      ]
+    : [
+        path.join(os.homedir(), '.local', 'bin', 'chroma'),
+        '/usr/local/bin/chroma',
+        '/opt/homebrew/bin/chroma',
+      ];
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
@@ -125,7 +138,7 @@ function spawnChroma() {
     const chromaProcess = child_process.spawn(
       chromaBin,
       ['run', '--path', CHROMA_DATA_DIR, '--host', 'localhost', '--port', String(CHROMA_PORT)],
-      { detached: true, stdio: 'ignore' }
+      { detached: true, stdio: 'ignore', windowsHide: true }
     );
     chromaProcess.unref();
     fs.writeFileSync(CHROMA_PID_FILE, String(chromaProcess.pid));

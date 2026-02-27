@@ -118,7 +118,14 @@ export async function initDb(): Promise<SqliteCompat> {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  const SQL = await initSqlJs();
+  // Locate WASM file explicitly — needed when bundled with esbuild (external)
+  // require.resolve('sql.js') -> .../sql.js/dist/sql-wasm.js, so dirname is already the dist folder
+  const sqlJsDistDir = path.dirname(require.resolve('sql.js'));
+  const wasmPath = path.join(sqlJsDistDir, 'sql-wasm.wasm');
+  const locateFile = fs.existsSync(wasmPath)
+    ? (file: string) => path.join(sqlJsDistDir, file)
+    : undefined;
+  const SQL = await initSqlJs(locateFile ? { locateFile } : undefined);
 
   let sqlDb: SqlJsDatabase;
   if (fs.existsSync(DB_PATH)) {
