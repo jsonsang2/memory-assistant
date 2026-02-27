@@ -11,6 +11,28 @@ const CURSOR_DIR = path.join(os.homedir(), '.cursor');
 const CURSOR_HOOKS_PATH = path.join(CURSOR_DIR, 'hooks.json');
 const CURSOR_MCP_PATH = path.join(CURSOR_DIR, 'mcp.json');
 const MA_DIR = path.join(os.homedir(), '.memory-assistant');
+const IS_WINDOWS = process.platform === 'win32';
+
+/**
+ * Set owner-only permissions on a file or directory.
+ * Unix: mode 0o700 (dir) / 0o600 (file)
+ * Windows: icacls to grant current user Full and remove inheritance
+ */
+function setOwnerOnly(targetPath, isDir) {
+  if (IS_WINDOWS) {
+    try {
+      const username = os.userInfo().username;
+      // Remove inherited permissions + grant only current user
+      execSync(`icacls "${targetPath}" /inheritance:r /grant:r "${username}:(OI)(CI)F" /T /Q`, { stdio: 'pipe' });
+    } catch {
+      console.warn(`        Warning: Could not set Windows ACL on ${targetPath}`);
+    }
+  } else {
+    try {
+      fs.chmodSync(targetPath, isDir ? 0o700 : 0o600);
+    } catch {}
+  }
+}
 
 function main() {
   console.log('');
@@ -20,8 +42,9 @@ function main() {
 
   // 1. Create ~/.memory-assistant/ with secure permissions
   if (!fs.existsSync(MA_DIR)) {
-    fs.mkdirSync(MA_DIR, { recursive: true, mode: 0o700 });
-    console.log('  [1/5] Created ~/.memory-assistant/ (mode 700)');
+    fs.mkdirSync(MA_DIR, { recursive: true });
+    setOwnerOnly(MA_DIR, true);
+    console.log('  [1/5] Created ~/.memory-assistant/ (owner-only access)');
   } else {
     console.log('  [1/5] ~/.memory-assistant/ already exists');
   }

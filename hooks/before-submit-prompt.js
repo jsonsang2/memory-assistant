@@ -36,11 +36,26 @@ async function readStdin() {
   });
 }
 
+function setOwnerOnlyFile(filePath) {
+  if (process.platform === 'win32') {
+    try {
+      const username = require('os').userInfo().username;
+      require('child_process').execSync(
+        `icacls "${filePath}" /inheritance:r /grant:r "${username}:F" /Q`,
+        { stdio: 'pipe' }
+      );
+    } catch {}
+  } else {
+    try { fs.chmodSync(filePath, 0o600); } catch {}
+  }
+}
+
 function ensureAuthToken() {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   if (!fs.existsSync(AUTH_TOKEN_FILE)) {
     const token = crypto.randomUUID();
-    fs.writeFileSync(AUTH_TOKEN_FILE, token, { mode: 0o600 });
+    fs.writeFileSync(AUTH_TOKEN_FILE, token);
+    setOwnerOnlyFile(AUTH_TOKEN_FILE);
     return token;
   }
   return fs.readFileSync(AUTH_TOKEN_FILE, 'utf8').trim();
