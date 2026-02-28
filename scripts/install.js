@@ -34,6 +34,44 @@ function setOwnerOnly(targetPath, isDir) {
   }
 }
 
+/**
+ * Attempt to install ChromaDB via pip.
+ * Returns true if installed successfully, false if Python/pip not available.
+ */
+function installChromaDB() {
+  // Find a working pip command
+  const pipCandidates = IS_WINDOWS
+    ? ['pip', 'pip3', 'python -m pip', 'python3 -m pip']
+    : ['pip3', 'pip', 'python3 -m pip', 'python -m pip'];
+
+  let pipCmd = null;
+  for (const cmd of pipCandidates) {
+    try {
+      execSync(`${cmd} --version`, { stdio: 'pipe', timeout: 10000 });
+      pipCmd = cmd;
+      break;
+    } catch {}
+  }
+
+  if (!pipCmd) return false;
+
+  // Check if chromadb is already installed
+  try {
+    execSync(`${pipCmd} show chromadb`, { stdio: 'pipe', timeout: 10000 });
+    console.log('        ChromaDB already installed');
+    return true;
+  } catch {}
+
+  // Install chromadb
+  try {
+    execSync(`${pipCmd} install chromadb`, { stdio: 'pipe', timeout: 300000 });
+    return true;
+  } catch (e) {
+    console.warn('        Warning: pip install chromadb failed');
+    return false;
+  }
+}
+
 function main() {
   console.log('');
   console.log('  memory-assistant installer');
@@ -44,13 +82,13 @@ function main() {
   if (!fs.existsSync(MA_DIR)) {
     fs.mkdirSync(MA_DIR, { recursive: true });
     setOwnerOnly(MA_DIR, true);
-    console.log('  [1/5] Created ~/.memory-assistant/ (owner-only access)');
+    console.log('  [1/7] Created ~/.memory-assistant/ (owner-only access)');
   } else {
-    console.log('  [1/5] ~/.memory-assistant/ already exists');
+    console.log('  [1/7] ~/.memory-assistant/ already exists');
   }
 
   // 2. Build Worker
-  console.log('  [2/5] Building Worker...');
+  console.log('  [2/7] Building Worker...');
   try {
     execSync('npm install && npm run build', {
       cwd: path.join(PLUGIN_DIR, 'worker'),
@@ -64,7 +102,7 @@ function main() {
   }
 
   // 3. Build MCP Server
-  console.log('  [3/5] Building MCP Server...');
+  console.log('  [3/7] Building MCP Server...');
   try {
     execSync('npm install && npm run build', {
       cwd: path.join(PLUGIN_DIR, 'mcp'),
@@ -78,7 +116,7 @@ function main() {
   }
 
   // 4. Register Cursor Hooks
-  console.log('  [4/5] Registering Cursor hooks...');
+  console.log('  [4/7] Registering Cursor hooks...');
   if (!fs.existsSync(CURSOR_DIR)) {
     fs.mkdirSync(CURSOR_DIR, { recursive: true });
   }
@@ -133,8 +171,18 @@ function main() {
   fs.writeFileSync(CURSOR_HOOKS_PATH, JSON.stringify(cursorHooks, null, 2));
   console.log('        Hooks registered: beforeSubmitPrompt, afterFileEdit, beforeShellExecution, stop');
 
-  // 5. Register MCP Server
-  console.log('  [5/5] Registering MCP server...');
+  // 5. Install ChromaDB (optional — skipped if Python/pip unavailable)
+  console.log('  [5/7] Installing ChromaDB for semantic search...');
+  const chromaInstalled = installChromaDB();
+  if (chromaInstalled) {
+    console.log('        ChromaDB installed successfully');
+  } else {
+    console.log('        Skipped: Python/pip not found. Semantic search disabled.');
+    console.log('        To enable later: pip install chromadb');
+  }
+
+  // 6. Register MCP Server
+  console.log('  [6/7] Registering MCP server...');
   let mcpConfig = { mcpServers: {} };
   if (fs.existsSync(CURSOR_MCP_PATH)) {
     // Backup before modifying
@@ -159,15 +207,19 @@ function main() {
   fs.writeFileSync(CURSOR_MCP_PATH, JSON.stringify(mcpConfig, null, 2));
   console.log('        MCP server registered: memory-assistant');
 
-  // Done
+  // 7. Done
+  console.log('');
+  console.log('  [7/7] Installation complete!');
   console.log('');
   console.log('  ✅ memory-assistant installed successfully!');
   console.log('');
   console.log('  Next steps:');
   console.log('    1. Restart Cursor');
   console.log('    2. (Optional) Set ANTHROPIC_API_KEY for AI summarization');
-  console.log('    3. (Optional) Install ChromaDB for semantic search:');
-  console.log('       pip install chromadb');
+  if (!chromaInstalled) {
+    console.log('    3. (Optional) Install ChromaDB for semantic search:');
+    console.log('       pip install chromadb');
+  }
   console.log('');
   console.log('  To uninstall: node scripts/uninstall.js');
   console.log('');

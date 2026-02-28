@@ -115,20 +115,63 @@ async function isChromaRunning() {
 
 function findChromaBinary() {
   const isWin = process.platform === 'win32';
-  const candidates = isWin
-    ? [
-        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', '**', 'Scripts', 'chroma.exe'),
-        path.join(os.homedir(), '.local', 'bin', 'chroma.exe'),
-      ]
+
+  // Static candidates (no globs)
+  const staticCandidates = isWin
+    ? [path.join(os.homedir(), '.local', 'bin', 'chroma.exe')]
     : [
         path.join(os.homedir(), '.local', 'bin', 'chroma'),
         '/usr/local/bin/chroma',
         '/opt/homebrew/bin/chroma',
       ];
-  for (const p of candidates) {
+
+  for (const p of staticCandidates) {
     if (fs.existsSync(p)) return p;
   }
+
+  // Windows: scan known Python install directories for chroma.exe
+  if (isWin) {
+    // Standard Python installer (e.g. Python312/Scripts)
+    const programsDir = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python');
+    const found1 = findFileRecursive(programsDir, 'chroma.exe', 3);
+    if (found1) return found1;
+
+    // Microsoft Store Python (e.g. PythonSoftwareFoundation.Python.3.13_.../LocalCache/local-packages/Python313/Scripts)
+    const packagesDir = path.join(os.homedir(), 'AppData', 'Local', 'Packages');
+    try {
+      const pyPkgs = fs.readdirSync(packagesDir).filter(e => e.startsWith('PythonSoftwareFoundation.Python'));
+      for (const pkg of pyPkgs) {
+        const found2 = findFileRecursive(path.join(packagesDir, pkg), 'chroma.exe', 5);
+        if (found2) return found2;
+      }
+    } catch {}
+  }
+
+  // Fallback: try system PATH via where/which
+  try {
+    const cmd = isWin ? 'where chroma' : 'which chroma';
+    const result = child_process.execSync(cmd, { stdio: 'pipe', timeout: 3000 }).toString().trim();
+    const firstLine = result.split(/\r?\n/)[0];
+    if (firstLine && fs.existsSync(firstLine)) return firstLine;
+  } catch {}
+
   return 'chroma';
+}
+
+function findFileRecursive(dir, filename, maxDepth) {
+  if (maxDepth <= 0) return null;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isFile() && entry.name === filename) return fullPath;
+      if (entry.isDirectory()) {
+        const found = findFileRecursive(fullPath, filename, maxDepth - 1);
+        if (found) return found;
+      }
+    }
+  } catch {}
+  return null;
 }
 
 function spawnChroma() {
